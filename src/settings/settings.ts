@@ -1,14 +1,26 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { 
+    App, 
+    normalizePath,
+    PluginSettingTab, 
+    Setting,
+    TAbstractFile,
+    TFile,
+    TFolder,
+    Vault,
+ } from "obsidian";
 import LocationContextMenu from "../main";
-import { FileSuggest } from "./suggest/fileSuggest";
 import { Location } from "./location";
-import { join } from "path";
+import { FolderSuggest } from "./suggest/folderSuggest";
+import { ConfigCreator } from "./createConfig";
 
 export interface Settings {
 	isAutosuggestEnabled: boolean;
     autocompleteTriggerPhrase: string;
     sourceFile: string;
     locations: Location[];
+
+    createConfigSourceFolder: string;
+    createConfigTag: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -16,6 +28,9 @@ export const DEFAULT_SETTINGS: Settings = {
     autocompleteTriggerPhrase: "/geo",
     sourceFile: "",
     locations: [],
+
+    createConfigSourceFolder: "",
+    createConfigTag: "",
 };
 
 export class LCMSettingsTab extends PluginSettingTab {
@@ -60,24 +75,56 @@ export class LCMSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 })
             );
-
-        new Setting(containerEl)
-            .setName("Key-Value file")
-            .setDesc("")
-            .addSearch((cb) => {
-                new FileSuggest(cb.inputEl, this.plugin);
-                cb.setPlaceholder("Example: folder1/key-value-file")
-                    .setValue(this.plugin.settings.sourceFile)
-                    .onChange((newFile) => {
-                        this.plugin.settings.sourceFile = newFile;
-                        this.plugin.saveSettings();
-                    });
-            });
         
-        this.add_configuration_setting();
+        this.addCreateConfigurationSetting();
+        this.addConfigurationSetting();
     }
 
-    add_configuration_setting(): void {
+    addCreateConfigurationSetting(): void {
+        new Setting(this.containerEl).setName("Create Configuration").setHeading();
+
+        new Setting(this.containerEl)
+            .setName("Folder")
+            .setDesc("Select a source folder")
+            .addSearch((cb) => {
+                new FolderSuggest(this.app, cb.inputEl);
+                cb.setPlaceholder("Example: folder1/folder2")
+                    .onChange((newFolder) => {
+                        this.plugin.settings.createConfigSourceFolder = newFolder;
+                        this.plugin.saveSettings();
+                    });
+                // @ts-ignore
+                cb.containerEl.addClass("templater_search");
+            });
+
+        new Setting(this.containerEl)
+            .setName("Tag")
+            .setDesc("Which string marks the content which should be inserted in the config?")
+            .addText((text) => {
+                text
+                .setPlaceholder("geo:")
+                .setValue(this.plugin.settings.createConfigTag)
+                .onChange((newTag) => {
+                    this.plugin.settings.createConfigTag = newTag.trim();
+                    this.plugin.saveSettings();
+                });
+            });
+
+        new Setting(this.containerEl)
+            .addButton((cb) => {
+                cb
+                .setButtonText("Create configuration")
+                .setCta()
+                .onClick((mouseEvent) => {
+                    const c = new ConfigCreator(this.app, this.plugin);
+                    const locs = c.create();
+                    this.plugin.settings.locations.push(...locs);
+                    this.plugin.saveSettings();
+                });
+            });
+    }
+
+    addConfigurationSetting(): void {
         new Setting(this.containerEl).setName("Configuration").setHeading();
 
         const desc = document.createDocumentFragment();
@@ -95,7 +142,7 @@ export class LCMSettingsTab extends PluginSettingTab {
 
         this.plugin.settings.locations.forEach((location, index) => {
             const s = new Setting(this.containerEl)
-                .addText((text) =>
+                .addTextArea((text) =>
                     text
                     .setPlaceholder("Comma-separated list of names")
                     .setValue(location.names.join(","))
@@ -105,7 +152,7 @@ export class LCMSettingsTab extends PluginSettingTab {
                     })
                 )
 
-                .addText((text) =>
+                .addTextArea((text) =>
                     text
                     .setPlaceholder("Coordinates")
                     .setValue(location.coordinates)
@@ -115,7 +162,18 @@ export class LCMSettingsTab extends PluginSettingTab {
                     })
                 )
 
-                s.infoEl.remove();
+                .addExtraButton((cb) => {
+                    cb.setIcon("cross")
+                        .setTooltip("Delete")
+                        .onClick(() => {
+                            this.plugin.settings.locations.splice(
+                                index,
+                                1
+                            );
+                            this.plugin.saveSettings();
+                            this.display();
+                        });
+                });
             }
         );
         
